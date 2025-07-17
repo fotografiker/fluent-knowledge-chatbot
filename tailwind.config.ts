@@ -26,7 +26,8 @@ export default {
 				foreground: 'hsl(var(--foreground))',
 				primary: {
 					DEFAULT: 'hsl(var(--primary))',
-					foreground: 'hsl(var(--primary-foreground))'
+					foreground: 'hsl(var(--primary-foreground))',
+					glow: 'hsl(var(--primary-glow))'
 				},
 				secondary: {
 					DEFAULT: 'hsl(var(--secondary))',
@@ -61,7 +62,17 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				ai: {
+					message: 'hsl(var(--ai-message))',
+					user: 'hsl(var(--user-message))',
+					chat: 'hsl(var(--chat-background))'
 				}
+			},
+			backgroundImage: {
+				'gradient-primary': 'var(--gradient-primary)',
+				'gradient-chat': 'var(--gradient-chat)',
+				'gradient-admin': 'var(--gradient-admin)'
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
@@ -84,11 +95,37 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'typing': {
+					'0%': { opacity: '0.4' },
+					'50%': { opacity: '1' },
+					'100%': { opacity: '0.4' }
+				},
+				'message-appear': {
+					'0%': { 
+						opacity: '0', 
+						transform: 'translateY(10px) scale(0.95)' 
+					},
+					'100%': { 
+						opacity: '1', 
+						transform: 'translateY(0) scale(1)' 
+					}
+				},
+				'pulse-glow': {
+					'0%, 100%': { 
+						boxShadow: '0 0 20px hsl(var(--primary) / 0.3)' 
+					},
+					'50%': { 
+						boxShadow: '0 0 40px hsl(var(--primary) / 0.6)' 
+					}
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'typing': 'typing 1.4s ease-in-out infinite',
+				'message-appear': 'message-appear 0.3s ease-out',
+				'pulse-glow': 'pulse-glow 2s ease-in-out infinite'
 			}
 		}
 	},
