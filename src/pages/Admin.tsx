@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LanguageToggle } from '@/components/LanguageToggle';
+import { useNavigate } from 'react-router-dom';
 import { 
   FileText, 
   Users, 
@@ -19,6 +20,7 @@ import {
 
 const Admin: React.FC = () => {
   const { t } = useLanguage();
+  const navigate = useNavigate();
 
   const stats = [
     {
@@ -122,10 +124,15 @@ const Admin: React.FC = () => {
                 <span className="font-medium text-sm">Quick Actions</span>
               </div>
               <div className="space-y-2">
-                <Button size="sm" variant="outline" className="w-full justify-start gap-2">
-                  <Upload className="h-3 w-3" />
-                  {t('docs.upload')}
-                </Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="w-full justify-start gap-2"
+                    onClick={() => navigate('/admin/documents')}
+                  >
+                    <Upload className="h-3 w-3" />
+                    {t('docs.upload')}
+                  </Button>
                 <Button size="sm" variant="outline" className="w-full justify-start gap-2">
                   <MessageSquare className="h-3 w-3" />
                   {t('nav.chat')}
@@ -240,7 +247,10 @@ const Admin: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  <Button className="w-full justify-start gap-2 bg-gradient-primary text-white">
+                  <Button 
+                    className="w-full justify-start gap-2 bg-gradient-primary text-white"
+                    onClick={() => navigate('/admin/documents')}
+                  >
                     <Upload className="h-4 w-4" />
                     Upload New Documents
                   </Button>
