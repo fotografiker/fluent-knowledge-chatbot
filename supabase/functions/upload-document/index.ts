@@ -1,7 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getDocument, GlobalWorkerOptions } from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -195,43 +194,54 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
   }
 }
 
-// Proper PDF text extraction using PDF.js
+// Simple PDF text extraction for basic text content
 async function extractTextFromPDF(file: Blob): Promise<string> {
   try {
-    // Configure PDF.js for Deno environment
-    GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
-    
     const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
     
-    // Load the PDF document
-    const loadingTask = getDocument({ data: uint8Array, verbosity: 0 });
-    const pdf = await loadingTask.promise;
+    // Extract text between stream and endstream markers
+    const streamPattern = /stream\s*\n([\s\S]*?)\n\s*endstream/g;
+    let extractedText = '';
+    let match;
     
-    let fullText = '';
-    
-    // Extract text from each page
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
+    while ((match = streamPattern.exec(text)) !== null) {
+      const streamContent = match[1];
       
-      // Combine text items from the page
-      const pageText = textContent.items
-        .map((item: any) => item.str || '')
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      // Look for readable text patterns (letters, numbers, common punctuation)
+      const readableText = streamContent.match(/[a-zA-Z0-9\s.,!?;:()\[\]{}'"@#$%^&*+=\-_<>/\\|`~]+/g);
       
-      if (pageText) {
-        fullText += pageText + '\n\n';
+      if (readableText) {
+        extractedText += readableText.join(' ').replace(/\s+/g, ' ').trim() + '\n';
       }
     }
     
-    return fullText.trim() || 'No text content found in PDF';
+    // Also try to extract text from other PDF structures
+    const textPattern = /\(([^)]+)\)/g;
+    const parenthesesMatches = text.match(textPattern);
+    
+    if (parenthesesMatches) {
+      const parenthesesText = parenthesesMatches
+        .map(match => match.slice(1, -1)) // Remove parentheses
+        .filter(text => text.length > 2 && /[a-zA-Z]/.test(text)) // Filter meaningful text
+        .join(' ');
+      
+      if (parenthesesText) {
+        extractedText += '\n' + parenthesesText;
+      }
+    }
+    
+    // Clean up the extracted text
+    const cleanedText = extractedText
+      .replace(/\s+/g, ' ')
+      .replace(/[^\w\s.,!?;:()\[\]{}'"@#$%^&*+=\-_<>/\\|`~]/g, '')
+      .trim();
+    
+    return cleanedText || 'PDF processed but no readable text found. This may be a scanned document or image-based PDF.';
     
   } catch (error) {
     console.error('PDF extraction error:', error);
-    return `Failed to extract text from PDF: ${error.message}`;
+    return `PDF uploaded successfully but text extraction failed: ${error.message}`;
   }
 }
 
