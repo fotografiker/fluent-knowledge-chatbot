@@ -45,12 +45,22 @@ const Documents: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDocuments();
+    // Check authentication first
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate('/login');
+        return;
+      }
+      fetchDocuments();
+    };
+
+    checkAuth();
     
     // Poll for status updates
     const interval = setInterval(fetchDocuments, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [navigate]);
 
   const fetchDocuments = async () => {
     try {
