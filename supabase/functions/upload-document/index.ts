@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getDocument, GlobalWorkerOptions } from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -194,16 +195,44 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
   }
 }
 
-// Basic PDF text extraction (simplified)
+// Proper PDF text extraction using PDF.js
 async function extractTextFromPDF(file: Blob): Promise<string> {
-  // This is a simplified implementation
-  // In a real-world scenario, you'd use a proper PDF parsing library
-  const arrayBuffer = await file.arrayBuffer();
-  const text = new TextDecoder().decode(arrayBuffer);
-  
-  // Basic text extraction - look for readable text patterns
-  const textMatches = text.match(/\s[\w\s.,!?;:()]+/g);
-  return textMatches ? textMatches.join(' ').trim() : 'Unable to extract text from PDF';
+  try {
+    // Disable worker to avoid issues in Deno environment
+    GlobalWorkerOptions.workerSrc = '';
+    
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // Load the PDF document
+    const loadingTask = getDocument({ data: uint8Array, verbosity: 0 });
+    const pdf = await loadingTask.promise;
+    
+    let fullText = '';
+    
+    // Extract text from each page
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      
+      // Combine text items from the page
+      const pageText = textContent.items
+        .map((item: any) => item.str || '')
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      if (pageText) {
+        fullText += pageText + '\n\n';
+      }
+    }
+    
+    return fullText.trim() || 'No text content found in PDF';
+    
+  } catch (error) {
+    console.error('PDF extraction error:', error);
+    return `Failed to extract text from PDF: ${error.message}`;
+  }
 }
 
 // Text chunking function
