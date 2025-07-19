@@ -136,6 +136,9 @@ const Documents: React.FC = () => {
 
       const response = await supabase.functions.invoke('upload-document', {
         body: formData,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       if (response.error) {
