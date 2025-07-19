@@ -126,6 +126,7 @@ const Documents: React.FC = () => {
     
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      console.log('Session check:', session ? 'Session found' : 'No session', session?.access_token ? 'Token exists' : 'No token');
       if (!session) {
         throw new Error('Authentication required');
       }
