@@ -198,8 +198,8 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
 // Proper PDF text extraction using PDF.js
 async function extractTextFromPDF(file: Blob): Promise<string> {
   try {
-    // Disable worker to avoid issues in Deno environment
-    GlobalWorkerOptions.workerSrc = '';
+    // Configure PDF.js for Deno environment
+    GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
     
     const arrayBuffer = await file.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
