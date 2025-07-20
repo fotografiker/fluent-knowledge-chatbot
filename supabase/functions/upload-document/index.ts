@@ -153,8 +153,8 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
     // Convert to text (improved PDF text extraction)
     const text = await extractTextFromPDF(fileData);
     
-    // Chunk the text
-    const chunks = chunkText(text, 1000, 200); // 1000 chars with 200 char overlap
+    // Chunk the text with improved chunking
+    const chunks = chunkText(text, 800, 150); // Smaller chunks with less overlap
     
     // Insert chunks
     const chunkPromises = chunks.map((chunk, index) => 
@@ -195,7 +195,7 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
   }
 }
 
-// Improved PDF text extraction using proper PDF parsing
+// Improved PDF text extraction with better structure preservation
 async function extractTextFromPDF(file: Blob): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
@@ -204,77 +204,115 @@ async function extractTextFromPDF(file: Blob): Promise<string> {
     // Convert to string for parsing
     const pdfString = new TextDecoder('latin1').decode(pdfData);
     
-    // Extract text from PDF objects
+    // Extract text with better structure preservation
     let extractedText = '';
+    const lines: string[] = [];
     
     // Look for text objects in PDF structure
     const textObjects = pdfString.match(/BT\s+.*?ET/gs) || [];
     
     for (const textObj of textObjects) {
-      // Extract text within parentheses or angle brackets
-      const textMatches = textObj.match(/\(([^)]*)\)|<([^>]*)>/g) || [];
+      // Extract positioning and text commands
+      const commands = textObj.split(/\s+/);
+      let currentLine = '';
       
-      for (const match of textMatches) {
-        let text = '';
-        if (match.startsWith('(') && match.endsWith(')')) {
-          text = match.slice(1, -1);
-        } else if (match.startsWith('<') && match.endsWith('>')) {
-          // Handle hex-encoded text
-          const hex = match.slice(1, -1);
-          try {
-            text = hex.match(/.{1,2}/g)?.map(byte => String.fromCharCode(parseInt(byte, 16))).join('') || '';
-          } catch {
-            text = hex;
+      for (let i = 0; i < commands.length; i++) {
+        const command = commands[i];
+        
+        // Look for text in parentheses (standard text)
+        if (command.includes('(') && command.includes(')')) {
+          const textMatch = command.match(/\(([^)]*)\)/);
+          if (textMatch) {
+            let text = textMatch[1]
+              .replace(/\\n/g, ' ')
+              .replace(/\\r/g, ' ')
+              .replace(/\\t/g, ' ')
+              .replace(/\\([()\\])/g, '$1')
+              .replace(/\\\d{3}/g, '')
+              .trim();
+            
+            if (text && text.length > 0 && /[a-zA-Z]/.test(text)) {
+              currentLine += text + ' ';
+            }
           }
         }
         
-        // Clean up the text
-        text = text
-          .replace(/\\n/g, '\n')
-          .replace(/\\r/g, '\r')
-          .replace(/\\t/g, '\t')
-          .replace(/\\([()\\])/g, '$1')
-          .replace(/\\\d{3}/g, '') // Remove octal sequences
-          .trim();
-          
-        if (text && text.length > 1 && /[a-zA-Z]/.test(text)) {
-          extractedText += text + ' ';
+        // Look for text in angle brackets (hex-encoded)
+        if (command.includes('<') && command.includes('>')) {
+          const hexMatch = command.match(/<([^>]*)>/);
+          if (hexMatch) {
+            try {
+              const hex = hexMatch[1];
+              const text = hex.match(/.{1,2}/g)?.map(byte => String.fromCharCode(parseInt(byte, 16))).join('') || '';
+              if (text && text.length > 0 && /[a-zA-Z]/.test(text)) {
+                currentLine += text + ' ';
+              }
+            } catch {
+              // Skip invalid hex
+            }
+          }
         }
-      }
-    }
-    
-    // If no text objects found, try alternative extraction
-    if (!extractedText.trim()) {
-      // Look for text in Tj and TJ operators
-      const tjMatches = pdfString.match(/\(([^)]+)\)\s*Tj/g) || [];
-      for (const match of tjMatches) {
-        const text = match.match(/\(([^)]+)\)/)?.[1] || '';
-        if (text && /[a-zA-Z]/.test(text)) {
-          extractedText += text + ' ';
-        }
-      }
-      
-      // Look for text arrays
-      const tjArrayMatches = pdfString.match(/\[([^\]]*)\]\s*TJ/g) || [];
-      for (const match of tjArrayMatches) {
-        const arrayContent = match.match(/\[([^\]]*)\]/)?.[1] || '';
-        const textParts = arrayContent.match(/\(([^)]*)\)/g) || [];
-        for (const part of textParts) {
-          const text = part.slice(1, -1);
-          if (text && /[a-zA-Z]/.test(text)) {
-            extractedText += text + ' ';
+        
+        // Check for line positioning commands that might indicate new lines
+        if (command === 'Td' || command === 'TD' || command === 'T*') {
+          if (currentLine.trim()) {
+            lines.push(currentLine.trim());
+            currentLine = '';
           }
         }
       }
+      
+      // Add any remaining text
+      if (currentLine.trim()) {
+        lines.push(currentLine.trim());
+      }
     }
     
-    // Clean up final text
-    const finalText = extractedText
+    // If no structured text found, try alternative extraction
+    if (lines.length === 0) {
+      // Look for Tj and TJ operators with better line detection
+      const tjMatches = pdfString.match(/\(([^)]+)\)\s*Tj/g) || [];
+      const tjArrayMatches = pdfString.match(/\[([^\]]*)\]\s*TJ/g) || [];
+      
+      for (const match of tjMatches) {
+        const textMatch = match.match(/\(([^)]+)\)/);
+        if (textMatch) {
+          const text = textMatch[1].replace(/\\n/g, ' ').replace(/\\r/g, ' ').trim();
+          if (text && /[a-zA-Z]/.test(text)) {
+            lines.push(text);
+          }
+        }
+      }
+      
+      for (const match of tjArrayMatches) {
+        const arrayContent = match.match(/\[([^\]]*)\]/)?.[1] || '';
+        const textParts = arrayContent.match(/\(([^)]*)\)/g) || [];
+        let arrayLine = '';
+        
+        for (const part of textParts) {
+          const text = part.slice(1, -1).replace(/\\n/g, ' ').replace(/\\r/g, ' ').trim();
+          if (text && /[a-zA-Z]/.test(text)) {
+            arrayLine += text + ' ';
+          }
+        }
+        
+        if (arrayLine.trim()) {
+          lines.push(arrayLine.trim());
+        }
+      }
+    }
+    
+    // Join lines with proper spacing and paragraph detection
+    extractedText = lines.join('\n');
+    
+    // Clean up the final text
+    extractedText = extractedText
       .replace(/\s+/g, ' ')
-      .replace(/[^\w\s.,!?;:()\[\]{}'"@#$%^&*+=\-_<>/\\|`~]/g, '')
+      .replace(/\n\s+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
     
-    return finalText || 'PDF processed but no readable text could be extracted. This may be a scanned document, image-based PDF, or the text may be encoded in a format not supported by this simple parser.';
+    return extractedText || 'PDF processed but no readable text could be extracted. This may be a scanned document, image-based PDF, or the text may be encoded in a format not supported by this parser.';
     
   } catch (error) {
     console.error('PDF extraction error:', error);
@@ -282,28 +320,86 @@ async function extractTextFromPDF(file: Blob): Promise<string> {
   }
 }
 
-// Text chunking function
-function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
+// Enhanced text chunking function with better sentence and paragraph awareness
+function chunkText(text: string, chunkSize: number = 800, overlap: number = 150): string[] {
   const chunks: string[] = [];
-  let start = 0;
   
-  while (start < text.length) {
-    let end = start + chunkSize;
-    
-    // Try to end at a sentence boundary
-    if (end < text.length) {
-      const lastPeriod = text.lastIndexOf('.', end);
-      const lastNewline = text.lastIndexOf('\n', end);
-      const boundary = Math.max(lastPeriod, lastNewline);
-      
-      if (boundary > start + chunkSize * 0.5) {
-        end = boundary + 1;
-      }
-    }
-    
-    chunks.push(text.slice(start, end).trim());
-    start = end - overlap;
+  if (text.length <= chunkSize) {
+    return [text];
   }
   
-  return chunks.filter(chunk => chunk.length > 0);
+  // Split text into paragraphs first
+  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  
+  let currentChunk = '';
+  
+  for (const paragraph of paragraphs) {
+    const trimmedParagraph = paragraph.trim();
+    
+    // If adding this paragraph would exceed chunk size
+    if (currentChunk.length + trimmedParagraph.length > chunkSize) {
+      // If we have content, save the current chunk
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+        
+        // Start new chunk with overlap from previous chunk
+        const words = currentChunk.split(' ');
+        const overlapWords = words.slice(-Math.floor(overlap / 6)); // Approximate word overlap
+        currentChunk = overlapWords.join(' ') + ' ';
+      }
+      
+      // If paragraph itself is too long, split it by sentences
+      if (trimmedParagraph.length > chunkSize) {
+        const sentences = trimmedParagraph.split(/[.!?]+/).filter(s => s.trim().length > 0);
+        
+        for (const sentence of sentences) {
+          const trimmedSentence = sentence.trim() + '.';
+          
+          if (currentChunk.length + trimmedSentence.length > chunkSize) {
+            if (currentChunk.trim()) {
+              chunks.push(currentChunk.trim());
+              currentChunk = '';
+            }
+            
+            // If single sentence is still too long, split by words
+            if (trimmedSentence.length > chunkSize) {
+              const words = trimmedSentence.split(' ');
+              let wordChunk = '';
+              
+              for (const word of words) {
+                if (wordChunk.length + word.length + 1 > chunkSize) {
+                  if (wordChunk.trim()) {
+                    chunks.push(wordChunk.trim());
+                  }
+                  wordChunk = word + ' ';
+                } else {
+                  wordChunk += word + ' ';
+                }
+              }
+              
+              if (wordChunk.trim()) {
+                currentChunk = wordChunk;
+              }
+            } else {
+              currentChunk = trimmedSentence + ' ';
+            }
+          } else {
+            currentChunk += trimmedSentence + ' ';
+          }
+        }
+      } else {
+        currentChunk += trimmedParagraph + '\n\n';
+      }
+    } else {
+      currentChunk += trimmedParagraph + '\n\n';
+    }
+  }
+  
+  // Add the final chunk if it has content
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  // Filter out very small chunks
+  return chunks.filter(chunk => chunk.length > 50);
 }
