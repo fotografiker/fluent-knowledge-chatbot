@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -149,7 +150,7 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
       throw new Error(`Failed to download file: ${downloadError.message}`);
     }
 
-    // Convert to text (basic PDF text extraction)
+    // Convert to text (improved PDF text extraction)
     const text = await extractTextFromPDF(fileData);
     
     // Chunk the text
@@ -194,54 +195,90 @@ async function processDocument(supabaseClient: any, documentId: string, filePath
   }
 }
 
-// Simple PDF text extraction for basic text content
+// Improved PDF text extraction using proper PDF parsing
 async function extractTextFromPDF(file: Blob): Promise<string> {
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+    const pdfData = new Uint8Array(arrayBuffer);
     
-    // Extract text between stream and endstream markers
-    const streamPattern = /stream\s*\n([\s\S]*?)\n\s*endstream/g;
+    // Convert to string for parsing
+    const pdfString = new TextDecoder('latin1').decode(pdfData);
+    
+    // Extract text from PDF objects
     let extractedText = '';
-    let match;
     
-    while ((match = streamPattern.exec(text)) !== null) {
-      const streamContent = match[1];
+    // Look for text objects in PDF structure
+    const textObjects = pdfString.match(/BT\s+.*?ET/gs) || [];
+    
+    for (const textObj of textObjects) {
+      // Extract text within parentheses or angle brackets
+      const textMatches = textObj.match(/\(([^)]*)\)|<([^>]*)>/g) || [];
       
-      // Look for readable text patterns (letters, numbers, common punctuation)
-      const readableText = streamContent.match(/[a-zA-Z0-9\s.,!?;:()\[\]{}'"@#$%^&*+=\-_<>/\\|`~]+/g);
-      
-      if (readableText) {
-        extractedText += readableText.join(' ').replace(/\s+/g, ' ').trim() + '\n';
+      for (const match of textMatches) {
+        let text = '';
+        if (match.startsWith('(') && match.endsWith(')')) {
+          text = match.slice(1, -1);
+        } else if (match.startsWith('<') && match.endsWith('>')) {
+          // Handle hex-encoded text
+          const hex = match.slice(1, -1);
+          try {
+            text = hex.match(/.{1,2}/g)?.map(byte => String.fromCharCode(parseInt(byte, 16))).join('') || '';
+          } catch {
+            text = hex;
+          }
+        }
+        
+        // Clean up the text
+        text = text
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\([()\\])/g, '$1')
+          .replace(/\\\d{3}/g, '') // Remove octal sequences
+          .trim();
+          
+        if (text && text.length > 1 && /[a-zA-Z]/.test(text)) {
+          extractedText += text + ' ';
+        }
       }
     }
     
-    // Also try to extract text from other PDF structures
-    const textPattern = /\(([^)]+)\)/g;
-    const parenthesesMatches = text.match(textPattern);
-    
-    if (parenthesesMatches) {
-      const parenthesesText = parenthesesMatches
-        .map(match => match.slice(1, -1)) // Remove parentheses
-        .filter(text => text.length > 2 && /[a-zA-Z]/.test(text)) // Filter meaningful text
-        .join(' ');
+    // If no text objects found, try alternative extraction
+    if (!extractedText.trim()) {
+      // Look for text in Tj and TJ operators
+      const tjMatches = pdfString.match(/\(([^)]+)\)\s*Tj/g) || [];
+      for (const match of tjMatches) {
+        const text = match.match(/\(([^)]+)\)/)?.[1] || '';
+        if (text && /[a-zA-Z]/.test(text)) {
+          extractedText += text + ' ';
+        }
+      }
       
-      if (parenthesesText) {
-        extractedText += '\n' + parenthesesText;
+      // Look for text arrays
+      const tjArrayMatches = pdfString.match(/\[([^\]]*)\]\s*TJ/g) || [];
+      for (const match of tjArrayMatches) {
+        const arrayContent = match.match(/\[([^\]]*)\]/)?.[1] || '';
+        const textParts = arrayContent.match(/\(([^)]*)\)/g) || [];
+        for (const part of textParts) {
+          const text = part.slice(1, -1);
+          if (text && /[a-zA-Z]/.test(text)) {
+            extractedText += text + ' ';
+          }
+        }
       }
     }
     
-    // Clean up the extracted text
-    const cleanedText = extractedText
+    // Clean up final text
+    const finalText = extractedText
       .replace(/\s+/g, ' ')
       .replace(/[^\w\s.,!?;:()\[\]{}'"@#$%^&*+=\-_<>/\\|`~]/g, '')
       .trim();
     
-    return cleanedText || 'PDF processed but no readable text found. This may be a scanned document or image-based PDF.';
+    return finalText || 'PDF processed but no readable text could be extracted. This may be a scanned document, image-based PDF, or the text may be encoded in a format not supported by this simple parser.';
     
   } catch (error) {
     console.error('PDF extraction error:', error);
-    return `PDF uploaded successfully but text extraction failed: ${error.message}`;
+    return `PDF uploaded successfully but text extraction failed: ${error.message}. You may need to use OCR for scanned documents.`;
   }
 }
 
